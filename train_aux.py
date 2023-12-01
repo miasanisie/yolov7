@@ -4,6 +4,8 @@ import math
 import os
 import random
 import time
+import gc
+import sys
 from copy import deepcopy
 from pathlib import Path
 from threading import Thread
@@ -98,11 +100,13 @@ def train(hyp, opt, device, tb_writer=None):
     train_path = data_dict['train']
     test_path = data_dict['val']
 
+
     # Freeze
     freeze = []  # parameter names to freeze (full or partial)
     for k, v in model.named_parameters():
         v.requires_grad = True  # train all layers
-        if any(x in k for x in freeze):
+        # if any(x in k for x in freeze):
+        if int(str(k).split(".")[1]) < 67: # Freezing backbone weights
             print('freezing %s' % k)
             v.requires_grad = False
 
@@ -359,7 +363,10 @@ def train(hyp, opt, device, tb_writer=None):
             # Forward
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
-                loss, loss_items = compute_loss_ota(pred, targets.to(device), imgs)  # loss scaled by batch_size
+                if 'loss_ota' not in hyp or hyp['loss_ota'] == 1:
+                    loss, loss_items = compute_loss_ota(pred, targets.to(device), imgs)  # loss scaled by batch_size
+                else:
+                    loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -474,6 +481,8 @@ def train(hyp, opt, device, tb_writer=None):
                         wandb_logger.log_model(
                             last.parent, opt, epoch, fi, best_model=best_fitness == fi)
                 del ckpt
+                torch.cuda.empty_cache()
+                gc.collect()
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
